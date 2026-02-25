@@ -20,7 +20,12 @@ from rich.markdown import Markdown
 OSC = "\033]"
 ST = "\a"
 
-IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+# Inline images: ![alt](url)
+IMAGE_INLINE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+# Reference images: ![alt][ref]
+IMAGE_REF_PATTERN = re.compile(r"!\[([^\]]*)\]\[([^\]]*)\]")
+# Reference definitions: [ref]: url
+REF_DEF_PATTERN = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 
 
 def get_terminal_width():
@@ -68,30 +73,70 @@ def image_width_cells(data: bytes, term_cols: int) -> int | None:
         return None
 
 
-def render(filepath: str):
-    path = Path(filepath).resolve()
-    if not path.is_file():
-        print(f"mdv: {filepath}: No such file", file=sys.stderr)
-        sys.exit(1)
+def fetch_markdown(source: str) -> tuple[str, Path | str]:
+    """Fetch markdown text from a local file or URL.
 
-    text = path.read_text(encoding="utf-8")
-    base_dir = path.parent
+    Returns (text, base) where base is a Path for local files
+    or a URL string for remote files (used to resolve relative images).
+    """
+    if source.startswith(("http://", "https://")):
+        try:
+            req = urllib.request.Request(source, headers={"User-Agent": "mdv/0.1"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                text = resp.read().decode("utf-8")
+            # Base URL for resolving relative image paths
+            base_url = source.rsplit("/", 1)[0] + "/"
+            return text, base_url
+        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            print(f"mdv: failed to fetch {source}: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        path = Path(source).resolve()
+        if not path.is_file():
+            print(f"mdv: {source}: No such file", file=sys.stderr)
+            sys.exit(1)
+        return path.read_text(encoding="utf-8"), path.parent
+
+
+def resolve_image_src(src: str, base: Path | str) -> str:
+    """Resolve a potentially relative image src against the base."""
+    if src.startswith(("http://", "https://")):
+        return src
+    if isinstance(base, str):
+        # base is a URL — join relative path
+        return base + src
+    # base is a local Path — return as-is, fetch_image handles it
+    return src
+
+
+def render(source: str):
+    text, base = fetch_markdown(source)
+    base_dir = base if isinstance(base, Path) else Path(".")
     term_cols = get_terminal_width()
     console = Console(width=term_cols)
+
+    # Build reference map from [ref]: url definitions
+    ref_map = {m.group(1).lower(): m.group(2) for m in REF_DEF_PATTERN.finditer(text)}
+
+    # Find all images (inline and reference-style) with their positions
+    images = []
+    for m in IMAGE_INLINE_PATTERN.finditer(text):
+        images.append((m.start(), m.end(), m.group(1), m.group(2)))
+    for m in IMAGE_REF_PATTERN.finditer(text):
+        ref_key = (m.group(2) or m.group(1)).lower()
+        src = ref_map.get(ref_key)
+        if src:
+            images.append((m.start(), m.end(), m.group(1), src))
+    images.sort(key=lambda x: x[0])
 
     # Split markdown by image references, rendering text and images in order
     last_end = 0
     segments: list[tuple[str, str | None]] = []  # (text_chunk, image_src_or_none)
 
-    for match in IMAGE_PATTERN.finditer(text):
-        start, end = match.span()
-        # Text before this image
+    for start, end, alt, src in images:
         text_before = text[last_end:start]
         if text_before.strip():
             segments.append((text_before, None))
-        # The image
-        alt = match.group(1)
-        src = match.group(2)
         segments.append((alt, src))
         last_end = end
 
@@ -111,7 +156,8 @@ def render(filepath: str):
             console.print(Markdown(chunk_text))
         else:
             # Try to display the image
-            data = fetch_image(img_src, base_dir)
+            resolved_src = resolve_image_src(img_src, base)
+            data = fetch_image(resolved_src, base_dir)
             if data:
                 width = image_width_cells(data, term_cols)
                 escape = iterm2_image_bytes(data, width)
@@ -127,13 +173,13 @@ def main():
         prog="mdv",
         description="Render markdown in the terminal with inline images.",
     )
-    parser.add_argument("file", help="Markdown file to render")
+    parser.add_argument("source", help="Markdown file path or URL to render")
     args = parser.parse_args()
 
     # Ctrl+C exits cleanly
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
 
-    render(args.file)
+    render(args.source)
 
     # Block until Ctrl+C
     console = Console()
