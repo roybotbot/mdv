@@ -14,6 +14,7 @@ from pathlib import Path
 from PIL import Image
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.padding import Padding
 
 # iTerm2 inline image escape sequence
 # https://iterm2.com/documentation-images.html
@@ -112,7 +113,9 @@ def resolve_image_src(src: str, base: Path | str) -> str:
 def render(source: str):
     text, base = fetch_markdown(source)
     base_dir = base if isinstance(base, Path) else Path(".")
+    MARGIN = 1
     term_cols = get_terminal_width()
+    content_width = term_cols - (MARGIN * 2)
     console = Console(width=term_cols)
 
     # Build reference map from [ref]: url definitions
@@ -145,27 +148,30 @@ def render(source: str):
     if remaining.strip():
         segments.append((remaining, None))
 
+    def print_md(md_text: str):
+        console.print(Padding(Markdown(md_text), (0, MARGIN)))
+
     # If no images found, just render the whole thing
     if not any(src for _, src in segments):
-        console.print(Markdown(text))
+        print_md(text)
         return
 
     for chunk_text, img_src in segments:
         if img_src is None:
             # Render markdown text
-            console.print(Markdown(chunk_text))
+            print_md(chunk_text)
         else:
             # Try to display the image
             resolved_src = resolve_image_src(img_src, base)
             data = fetch_image(resolved_src, base_dir)
             if data:
-                width = image_width_cells(data, term_cols)
+                width = image_width_cells(data, content_width)
                 escape = iterm2_image_bytes(data, width)
-                sys.stdout.write(escape + "\n")
+                sys.stdout.write(" " * MARGIN + escape + "\n")
             else:
                 # Fallback: show alt text or URL
                 alt_display = chunk_text if chunk_text else img_src
-                console.print(f"  [dim]\\[image: {alt_display}][/dim]")
+                console.print(Padding(f"[dim]\\[image: {alt_display}][/dim]", (0, MARGIN)))
 
 
 def main():
@@ -183,7 +189,7 @@ def main():
 
     # Block until Ctrl+C
     console = Console()
-    console.print("\n[dim]Press Ctrl+C to exit[/dim]", end="")
+    console.print(Padding("\n[dim]Press Ctrl+C to exit[/dim]", (0, 1)), end="")
     try:
         signal.pause()
     except AttributeError:
