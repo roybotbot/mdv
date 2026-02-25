@@ -113,7 +113,7 @@ def resolve_image_src(src: str, base: Path | str) -> str:
 def render(source: str):
     text, base = fetch_markdown(source)
     base_dir = base if isinstance(base, Path) else Path(".")
-    MARGIN = 1
+    MARGIN = 2
     term_cols = get_terminal_width()
     content_width = term_cols - (MARGIN * 2)
     console = Console(width=term_cols)
@@ -189,7 +189,7 @@ def main():
 
     # Block until Ctrl+C
     console = Console()
-    console.print(Padding("\n[dim]Press Ctrl+C to exit[/dim]", (0, 1)), end="")
+    console.print(Padding("\n[dim]Press Ctrl+C to exit[/dim]", (0, 2)), end="")
     try:
         signal.pause()
     except AttributeError:
