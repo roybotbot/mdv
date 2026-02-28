@@ -15,7 +15,7 @@ mdv README.md
 mdv path/to/any/file.md
 ```
 
-Press Ctrl+C to exit.
+Press `q`, `Esc`, or `Ctrl+C` to exit.
 
 ## Features
 
