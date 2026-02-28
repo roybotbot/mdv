@@ -187,19 +187,25 @@ def main():
 
     render(args.source)
 
-    # Block until Ctrl+C
+    # Block until q, Escape, or Ctrl+C
     console = Console()
-    console.print(Padding("\n[dim]Press Ctrl+C to exit[/dim]", (0, 2)), end="")
+    console.print(Padding("\n[dim]Press q, Esc, or Ctrl+C to exit[/dim]", (0, 2)), end="")
+    sys.stdout.flush()
+
+    import tty
+    import termios
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
     try:
-        signal.pause()
-    except AttributeError:
-        # Windows fallback
-        import time
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            pass
+        tty.setraw(fd)
+        while True:
+            ch = sys.stdin.read(1)
+            if ch in ("q", "Q", "\x1b", "\x03"):  # q, Escape, Ctrl+C
+                break
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        sys.stdout.write("\n")
 
 
 if __name__ == "__main__":
